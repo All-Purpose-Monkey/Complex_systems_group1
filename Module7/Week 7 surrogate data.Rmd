@@ -1,0 +1,173 @@
+---
+title: "Do deviations from average monthly temperatures follow a chaotic pattern?"
+author: "Group 1"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r, include=FALSE}
+file <- readLines("Week 7 surrogate data.Rmd")
+file <- file[!grepl("^```", file)]   # code eruit
+text <- paste(file, collapse = " ")
+word_count <- length(strsplit(text, "\\s+")[[1]])
+```
+
+*Word count: `r word_count`*
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#set working directory
+setwd('/Users/sterrevanderjagt/Documents/Data_Science/DSS blok 3/Complex systems/Complex_systems_group1-main/Module7')
+
+#packages
+library(dplyr)
+library(pracma)
+
+# Turn off scientific notation
+options(scipen = 999)
+
+#data 
+df <- read.csv("etmgeg_260.txt", skip = 51, sep = ",")
+df <- df[, c("YYYYMMDD", "TG", "TX", "TN")]
+df$TG <- df$TG / 10
+df$TX <- df$TX / 10
+df$TN <- df$TN / 10
+df$YYYYMMDD <- as.Date(as.character(df$YYYYMMDD), format = "%Y%m%d")
+
+df <- df[df$YYYYMMDD >= as.Date("1980-01-01") &
+           df$YYYYMMDD <= as.Date("2000-01-01"), ]
+```
+
+## Introduction
+
+In this analysis, we examine daily temperature data recorded in De Bilt over the period from 1 January 1980 to 1 January 2000. Based on climatological knowledge, we expect to see a clear seasonal pattern in the data, with temperatures following a sinusoidal curve throughout the year as a result of the alternation between summer and winter.	To look specifically at the unpredictability of the weather, and whether deviations in temperature are predictable or random, we first remove the seasonal pattern. We do this by calculating the monthly average over the period 1980–2000 and then examining the deviation from this monthly average. In this way, we are not analysing the temperature itself, but the deviations from what is normal for that month. 
+Because temperature deviations often do not change completely randomly from day to day, we expect that there may be structure present in the short term (e.g. a few days) and possibly also in the longer term (e.g.two weeks). Therefore, in addition to daily analysis, we also examine patterns at the two week level to investigate whether any structures occur across different timescales.  
+Based on this, we formulate two null hypotheses. The first hypothesis states that the temporal order of the data is irrelevant and that the temperature deviations are random over time. The second hypothesis states that there is no additional structure present on longer timescales, and that any patterns can be fully explained by short-term fluctuations.  
+By working with deviations from the monthly mean, we expect the distribution of these deviations over time to remain roughly constant. Any differences between early and late years may indicate long-term changes in the system.
+
+## Method
+To test these hypotheses, we compare original data to surrogate data to test whether observed structure is different from random processes. This is surrogate testing. In this process, we compare the original time series with modified versions of the data in which the temporal structure has been (partially) removed.
+
+### What is surrogate testing? 
+Surrogate testing is a method used to determine whether a time series contains a genuine structure, or whether its behaviour could also arise by chance. This is done by comparing the original data with modified versions of that data (surrogates), in which the temporal order is partially or completely removed.  
+
+Two types of surrogates were used in this analysis:  
+**Random permutation surrogates**: Here, all values are shuffled randomly. The distribution of the data remains the same, but all temporal structure disappears. This is used to test whether the order of the data is important.  
+**Block permutation surrogates (14 days)**: Here, the data is divided into blocks of 14 days, and these blocks are then shuffled. Within each block, the short-term structure is preserved, but the order of the weeks disappears. This is used to investigate whether there is structure on longer timescales.
+By comparing the results of the original data with these surrogates, you can determine whether the temperature data contains more structure than you would expect by chance.  
+
+First, we use random permutation surrogates to test whether any patterns exist in the weather at all, and then we test using block permutation surrogates. In this way, short-term structure is preserved, whilst longer-term patterns are removed. This makes it possible to investigate whether any structures are primarily found on short or longer timescales.  
+If the sample entropy of the original temperature series systematically deviates from that of the surrogates, this indicates that the data contains more structure than would be expected from a random process. To calculate sample entropy, we use the pracma package in R.
+
+## Results
+\
+\
+```{r, echo=FALSE}
+plot(df$YYYYMMDD, df$TG, type = "l",
+     xlab = "Time (years)", ylab = "Temperature",
+     main = "Daily average temperature")
+```
+\
+\
+The “Daily average temperature” plot above clearly shows a sinusoidal pattern over the years. We do not wish to include this seasonal pattern in the analysis, as we are specifically interested in the deviations from this pattern. Therefore, this component is removed from the data by calculating the monthly average and subtracting it from the temperature.
+\
+\
+```{r, echo=FALSE}
+monthly_mean <- ave(df$TG, format(df$YYYYMMDD, "%m"))
+df$tg_detrended <- df$TG - monthly_mean # no missings
+
+plot(df$tg_detrended, type = "l",
+     xlab = "Time (days)",
+     ylab = "Standardized temperature anomaly",
+     main = "Detrended Temperature")
+
+```
+\
+\
+These deviations can be seen in the “Detrended temperature” plot. These values are then normalised using a z-score, so that the data has a mean of 0 and a standard deviation of 1. This is shown in the “Z-scored detrended temperature” plot. These normalised values are used for the surrogate analysis.
+\
+\
+```{r, echo=FALSE}
+df$tg_station <- (df$tg_detrended - mean(df$tg_detrended)) / sd(df$tg_detrended)
+
+plot(df$tg_station, type = "l",
+     xlab = "Time (days)",
+     ylab = "Standardized temperature anomaly",
+     main = "Z-scored detrended temperature")
+```
+\
+\
+Based on this normalised data, the sample entropy was calculated, yielding a value of:
+```{r, echo=FALSE}
+TG_SampEn <- sample_entropy(df$tg_station, edim = 2, r = 0.2 * sd(df$tg_station), tau = 1)
+TG_SampEn
+```
+
+Surrogates were then generated by randomly shuffling the data, and the entropy was calculated again for these surrogates. This resulted in a confidence interval of approximately:
+```{r, echo=FALSE}
+set.seed(240426)
+rand_surr_tg_station_20 <- replicate(50, sample(df$tg_station, replace = FALSE))
+rand_surr_tg_station_SampEn_20 <- apply(rand_surr_tg_station_20, MARGIN=2, 
+                                        FUN = pracma::sample_entropy, 
+                                        edim=2,r=0.2*sd(rand_surr_tg_station_20[,1]),tau=1)
+
+
+mean_surr <- mean(rand_surr_tg_station_SampEn_20)
+n_surr <- length(rand_surr_tg_station_SampEn_20)
+sd_surr <- sd(rand_surr_tg_station_SampEn_20)
+error <- qt(.975, df = n_surr - 1) * sd_surr/sqrt(n_surr)
+CI <- c(lower = mean_surr - error, mean = mean_surr, upper = mean_surr + error)
+CI 
+```
+
+Since the entropy of the original data is clearly lower than that of the shuffled data, this means that the temperature series contains more structure than would be expected by chance. In other words: the order of the data is important and there is temporal dependence.  
+To investigate this further, the autocorrelation of the data was examined, i.e. the extent to which the data resembles a shifted version of itself. This is shown in the plot “Autocorrelation of detrended temperature”. This reveals that a clear positive correlation is present up to approximately 14 days. This means that temperatures up to approximately two weeks are still dependent on previous values.  
+Based on this observation, blocks of 14 days are used in the subsequent analysis for the block surrogate method, so that the short-term structure is retained whilst longer-term patterns are tested.
+\
+\
+```{r, echo=FALSE}
+acf(df$tg_station,
+    main = "Autocorrelation of Detrended Temperature",
+    xlab = "Lag (days)",
+    ylab = "Autocorrelation")
+```
+\
+\
+
+### Long term changes
+After applying block surrogates with 14-day blocks, the sample entropy lies in the range of approximately:
+```{r, echo=FALSE}
+ #block shuffel
+block_shuffle <- function(x, block_size = 14) {
+  n <- length(x)
+  n_blocks <- floor(n / block_size)
+  blocks <- split(x[1:(n_blocks * block_size)],
+                  rep(1:n_blocks, each = block_size))
+  shuffled_blocks <- sample(blocks)
+  shuffled <- unlist(shuffled_blocks)
+  return(shuffled)
+}
+
+block_surr <- replicate(50, block_shuffle(df$tg_station, block_size = 14))
+block_sampen <- apply(block_surr, MARGIN=2, 
+                      FUN = pracma::sample_entropy, 
+                      edim=2,r=0.2*sd(block_surr[,1]),tau=1)
+
+mean_surr_block <- mean(block_sampen)
+n_surr_block <- length(block_sampen)
+sd_surr_block <- sd(block_sampen)
+error_block <- qt(.975, df = n_surr_block - 1) * sd_surr_block/sqrt(n_surr_block)
+CI_block <- c(lower = mean_surr_block - error_block, mean = mean_surr_block, upper = mean_surr_block + error_block)
+CI_block
+``` 
+
+These values are clearly lower than the entropy of the fully shuffled data (approximately 2.16), but still higher than the entropy of the original data (1.52).
+This means that the preservation of short-term structure (up to approximately 14 days) explains part of the dynamics in the temperature data, but not all of it. There therefore remains additional structure in the original data that is not fully explained by short-term fluctuations alone.
+From this, we can conclude that temperature variations do not depend solely on short-term weather changes, but that there is also structure present on longer timescales.
+
+## Conclusion
+This study examined the structure of temperature anomalies using surrogate data analysis. The results provide strong evidence that the temperature series is not entirely random over time. The original data clearly differs from the fully shuffled surrogates, suggesting that the order of the data is significant.  
+Furthermore, comparison with block surrogates shows that structure is also present on longer timescales. Retaining short-term information (up to approximately 14 days) explains part of the dynamics, but not all differences compared to the original data.  
+It follows that both short-term and longer-term dependencies are present in the temperature data. The data cannot therefore be fully explained by a random process without a temporal structure.  
+However, this analysis has limitations. The chosen block size of 14 days is shorter than a full month, meaning that potential monthly seasonal variations are not fully captured in the block surrogates. Consequently, there may still be structure present that is not explained by the chosen block length. The question therefore remains to what extent this choice is sufficient to capture all relevant timescales in the data.
