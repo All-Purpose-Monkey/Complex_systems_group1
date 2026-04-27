@@ -1,0 +1,331 @@
+# Recurrence Quantification Analysis of Beijing PM2.5 (2010–2014)
+
+**Module 6 — Complex Systems**  
+**Course:** Quantitative Methods in Complex Systems  
+**Instructor:** Travis J. Wiltshire  
+---
+
+## 1. Introduction
+
+Air pollution has become a major concern in China, especially in the capital city of Beiking.  The PM2.5 signal,  is a critical 
+air quality inficator that measures fine particles that are suspended in the air. is not simply random noise. It reflects the emergent behavior 
+of a complex atmospheric system driven by seasonal forcing, meteorological coupling,
+and episodic pollution events.
+
+This report addresses four core questions:
+
+1. Which recurrence properties best differentiate important aspects of the PM2.5 signal?
+2. How are recurrence dynamics similar and different across RQA, CRQA, and mdRQA?
+3. How does parameter choice (M, τ, radius) affect the outcome?
+4. What is a robust way to identify interesting changes in dynamics over time?
+
+The dataset is based on Liang et al. (2015), documenting Beijing air quality from 
+2010 to 2014. Hourly measurements were aggregated to 1,826 daily averages across 
+four variables: PM2.5, temperature, atmospheric pressure, and wind speed. All 
+variables were z-score normalized prior to analysis.
+
+Dataset: [Beijing PM2.5 — UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/381/beijing+pm2+5+data)
+
+
+## 2. Data Overview
+
+![Beijing raw signal](beijing_raw.png)
+
+*Figure 1. Daily variables of all four variables (2010-2014) with rolling means on top. There are clear spikes in 2.5 
+during winter, especially in 2013. There is also a smooth yearly change in temperature. Pressure follows the opposite of 
+seasonal patterns.*
+
+**Table 1. Descriptive statistics of daily variables**
+
+| Variable | Mean | Std | Min | Max |
+|---|---|---|---|---|
+| PM2.5 (μg/m³) | 97.81 | 76.96 | 2.96 | 541.04 |
+| Temperature (°C) | 12.45 | 11.56 | -14.46 | 32.88 |
+| Pressure (hPa) | 1016.45 | 10.07 | 994.04 | 1043.46 |
+| Wind speed (m/s) | 23.89 | 41.36 | 1.41 | 463.19 |
+
+
+
+## 3. Parameter Selection
+
+Before using RQA, three parameters must be estimated: the time delay (τ), 
+the embedding dimension (M), and the recurrence radius.
+
+### 3.1 Time Delay : Average Mutual Information (AMI)
+
+The optimal time delay τ was estimated using the Average Mutual Information 
+function. The first local minimum of AMI shows the lag at which consecutive 
+embedded coordinates become as independent as possible, which gives the best reconstruction of the
+attractor.
+
+![AMI](fig_ami.png)
+
+*Figure 2. Average Mutual Information as a function of lag. The first local 
+minimum occurs at τ = 4 days.*
+
+The AMI function reached its first local minimum at **τ = 4 days**. This makes 
+physical sense — pollution episodes in Beijing typically last 3–5 days before 
+wind or rain disperses the accumulated particulate matter.
+
+### 3.2 Embedding Dimension — False Nearest Neighbors (FNN)
+
+The False Nearest Neighbors method identifies the minimum number of dimensions 
+needed so that nearby points in phase space remain true neighbors rather than 
+becoming artificially close due to projection from a lower-dimensional space.
+
+![FNN](fig_fnn.png)
+
+*Figure 3. False Nearest Neighbors percentage as a function of embedding 
+dimension. FNN drops below 5% at M = 4.*
+
+FNN dropped below the 5% threshold at **M = 4**, meaning four delayed copies 
+of the PM2.5 signal are required to fully unfold its attractor. At M = 1 and 
+M = 2, over 60% of neighbors were false — confirming the signal was severely 
+under-embedded in lower dimensions.
+
+### 3.3 Radius Selection
+
+Following the recommended 2–5% recurrence range for environmental signals, a 
+binary search was used to find the radius producing approximately 3% recurrence.
+
+**Table 2. Final RQA parameters**
+
+| Parameter | Value | Method |
+|---|---|---|
+| Delay (τ) | 4 days | AMI first local minimum |
+| Embedding dimension (M) | 4 | FNN below 5% threshold |
+| Radius | 0.7897 | Binary search targeting ~3% recurrence |
+| Actual %REC | 3.05% | Verification |
+
+---
+
+## 4. RQA — PM2.5 Auto-Recurrence
+
+### 4.1 Recurrence Plot
+
+![Recurrence Plot](fig_recurrence_plot.png)
+
+*Figure 4. Recurrence plot of PM2.5 (τ=4, M=4, radius=0.7897). Diagonal 
+line structures indicate repeated trajectories. Annual block patterns reflect 
+the seasonal cycle.*
+
+The recurrence plot shows clear diagonal line structures running parallel to 
+the main diagonal, indicating that PM2.5 repeatedly follows similar trajectories 
+over time. The periodic block pattern — repeating approximately every 365 days — 
+reflects the annual seasonal cycle. Denser clusters around 2011 and 2013 
+correspond to severe winter pollution episodes.
+
+### 4.2 RQA Measures
+
+![RQA Results](fig_rqa_results.png)
+
+*Figure 5. RQA measures for PM2.5.*
+
+**Table 3. RQA results**
+
+| Measure | Value | Interpretation |
+|---|---|---|
+| %REC | 3.05% | System returns to prior states at a structured rate |
+| %DET | 16.74% | Moderate determinism — trajectories partly predictable |
+| maxL | 11 days | Longest consistent trajectory lasts 11 days |
+| L | 2.13 days | Average diagonal line length |
+| ENTR | 0.39 | Low complexity — mostly short recurrent episodes |
+| %LAM | 32.64% | System gets trapped in sustained states frequently |
+| TT | 2.28 days | Average trapping time per pollution episode |
+
+The most diagnostic finding is that **%LAM (32.64%) is nearly double %DET 
+(16.74%)**. PM2.5 gets trapped in elevated or depressed states more than it 
+follows structured trajectories — consistent with pollution episodes that are 
+sticky but not highly predictable in their onset.
+
+---
+
+## 5. CRQA — PM2.5 × Temperature
+
+Cross-Recurrence Quantification Analysis examines whether the state of PM2.5 
+at time *i* is close to the state of temperature at time *j*, revealing the 
+degree of dynamic coupling between the two variables.
+
+### 5.1 Cross-Recurrence Plot
+
+![CRQA Plot](fig_crqa_plot.png)
+
+*Figure 6. Left: RQA recurrence plot (PM2.5 vs itself). Right: CRQA 
+cross-recurrence plot (PM2.5 × temperature). The banded structure in CRQA 
+reflects seasonal coupling.*
+
+The cross-recurrence plot looks strikingly different from the auto-recurrence 
+plot. A clear horizontal band appears along the bottom, and the middle regions 
+are sparse. This banded pattern reflects the anti-phase seasonal relationship — 
+PM2.5 peaks in winter exactly when temperature is lowest, so they only share 
+similar states at seasonal extremes.
+
+### 5.2 RQA vs CRQA Comparison
+
+![RQA vs CRQA](fig_rqa_vs_crqa.png)
+
+*Figure 7. Bar chart comparison of RQA and CRQA measures.*
+
+**Table 4. RQA vs CRQA comparison**
+
+| Measure | RQA (PM2.5) | CRQA (PM2.5×Temp) | Difference |
+|---|---|---|---|
+| %REC | 3.05% | 2.28% | -0.77 |
+| %DET | 16.74% | **34.56%** | +17.82 |
+| maxL | 11 | **16** | +5 |
+| ENTR | 0.39 | 0.72 | +0.33 |
+| %LAM | 32.64% | 37.52% | +4.88 |
+| TT | 2.28 | 2.36 | +0.08 |
+
+The most surprising finding is that **%DET is more than double in CRQA 
+(34.56% vs 16.74%)**. When PM2.5 and temperature share similar states, those 
+shared states form longer, more structured diagonal lines — reflecting the 
+strong seasonal forcing that drives both variables into predictable joint 
+trajectories during winter.
+
+---
+
+## 6. DCRP — Leader-Follower Analysis
+
+The Diagonal Cross-Recurrence Profile sweeps across lags from -60 to +60 days, 
+measuring recurrence rate along each diagonal. This reveals whether one variable 
+consistently leads the other in time.
+
+![DCRP](fig_dcrp.png)
+
+*Figure 8. Diagonal Cross-Recurrence Profile. Peak at lag = +47 days indicates 
+temperature leads PM2.5 by approximately 47 days.*
+
+The DCRP shows a clear peak at **lag = +47 days**, meaning temperature changes 
+precede PM2.5 changes by approximately 6–7 weeks. Recurrence is lowest near 
+lag = 0, meaning the two variables are least dynamically similar simultaneously. 
+This makes meteorological sense: autumn temperatures drop in October, atmospheric 
+inversion conditions build over the following weeks, and PM2.5 peaks arrive in 
+December — roughly 47 days later.
+
+**Temperature is the leading variable in this coupled system.**
+
+---
+
+## 7. Windowed RQA — Dynamics Over Time
+
+RQA was applied in sliding 90-day windows with 30-day steps, producing a time 
+series of RQA measures that reveals epochs of high or low regularity.
+
+![Windowed RQA](fig_windowed_rqa.png)
+
+*Figure 9. Windowed RQA showing %REC, %DET, and %LAM over time. Red shaded 
+region marks the 2013 pollution event.*
+
+Three important findings emerge from the windowed analysis:
+
+**%REC** drops to nearly zero at the start of 2013 — the system briefly entered 
+completely novel states — then spikes to its highest value in the entire 5-year 
+period (~14%). This marks the 2013 Beijing pollution event as a genuine dynamical 
+transition.
+
+**%DET** reveals that the 2011 winter was the most deterministic period (~42%), 
+meaning pollution trajectories were more predictable that year than any other. 
+This varies substantially across years, confirming that determinism is not stable 
+over time.
+
+**%LAM** reaches its maximum in 2011 winter (~60%), confirming that pollution 
+episodes were most sustained during that period. The near-zero drop at early 2013 
+followed by a sharp recovery shows that the extreme event broke existing recurrence 
+patterns before establishing new ones.
+
+---
+
+## 8. mdRQA — All Four Variables Together
+
+Multidimensional RQA was applied to all four variables simultaneously — PM2.5, 
+temperature, pressure, and wind — treating each day as a 4-dimensional state 
+vector. No time-delay embedding was applied since each variable already represents 
+one dimension of the full system.
+
+![mdRQA Plot](fig_mdrqa_plot.png)
+
+*Figure 10. mdRQA recurrence plot of all four variables combined. The periodic 
+grid structure reflects the annual recurrence of the full atmospheric system.*
+
+The mdRQA plot shows a striking periodic grid pattern, with recurrence clusters 
+at regular ~365-day intervals. The seasonal cycle of the complete atmospheric 
+system is far more visible in mdRQA than in any single-variable analysis.
+
+---
+
+## 9. Comparison of All Three Methods
+
+![All Methods Comparison](fig_all_methods_comparison.png)
+
+*Figure 11. Complete comparison of RQA, CRQA, and mdRQA measures.*
+
+**Table 5. Final results summary — all three methods**
+
+| Measure | RQA (PM2.5) | CRQA (PM2.5×Temp) | mdRQA (All 4) |
+|---|---|---|---|
+| %REC | 3.05% | 2.28% | 3.18% |
+| %DET | 16.74% | 34.56% | **40.73%** |
+| maxL | 11 | 16 | 12 |
+| ENTR | 0.39 | 0.72 | **0.82** |
+| %LAM | 32.64% | 37.52% | **55.06%** |
+| TT | 2.28 | 2.36 | 2.66 |
+
+The clear pattern is that **determinism and laminarity increase with every 
+additional dimension**. PM2.5 alone appears mostly irregular (%DET = 16.74%), 
+but embedded in its full atmospheric context the system is highly organised 
+(%DET = 40.73%). The %LAM nearly doubles from RQA to mdRQA (32.64% → 55.06%), 
+indicating that the complete atmospheric system gets trapped in sustained states 
+far more than any single variable suggests.
+
+---
+
+## 10. Parameter Sensitivity
+
+![Sensitivity](fig_sensitivity.png)
+
+*Figure 12. Sensitivity of RQA measures to changes in radius. The chosen 
+radius (red dashed line) sits in the stable lower region of all curves.*
+
+All three measures increase monotonically with radius, as expected. Crucially, 
+the relative ordering and interpretation of results remain stable across a range 
+of radius values around the chosen threshold of 0.7897. The findings are robust 
+and not artifacts of the specific parameter chosen.
+
+---
+
+## 11. Conclusion
+
+Applying RQA-based methods to the Beijing PM2.5 dataset reveals a dynamically 
+structured signal with meaningful recurrence properties:
+
+- PM2.5 shows moderate determinism (%DET = 16.74%) and high laminarity 
+(%LAM = 32.64%), with typical trapping times of ~2 days
+- CRQA reveals that PM2.5–temperature coupling is seasonally driven and more 
+deterministic than PM2.5 alone (%DET = 34.56%)
+- The DCRP identifies temperature as the leading variable, preceding PM2.5 
+changes by ~47 days
+- Windowed RQA shows the 2013 Beijing pollution event as a genuine dynamical 
+transition — all three measures drop to near zero then spike to new highs
+- mdRQA reveals the full atmospheric system is far more deterministic 
+(%DET = 40.73%) and laminar (%LAM = 55.06%) than any single variable
+- Parameter sensitivity confirms all findings are robust to changes in radius
+
+---
+
+## References
+
+Liang, X., Zou, T., Guo, B., Li, S., Zhang, H., Zhang, S., Huang, H., & Chen, 
+S. X. (2015). Assessing Beijing's PM2.5 pollution: Severity, weather impact, 
+APEC and winter heating. *Proceedings of the Royal Society A*, 471(2182), 20150257.
+
+Wallot, S., & Leonardi, G. (2018). Analyzing multivariate dynamics using 
+cross-recurrence quantification analysis (CRQA), diagonal-cross-recurrence 
+profiles (DCRP), and multidimensional recurrence quantification analysis 
+(mdRQA). *Frontiers in Psychology*, 9, 2232.
+
+Wiltshire, T. J. (2026). Lecture slides: Recurrence Quantification Analysis 
+(Module 6).
+
+Butner, J. (2017). *Quantitative reasoning under a dynamical social science* 
+(pp. 24–41, Chapter 2).
