@@ -8,3 +8,5 @@ Module 3 - Properties of Complex systems [Temporal Dynamics Analysis of PM2.5 (2
 
 
 Module 6 - Recurrence Quantifiation Analysis [Temporal Dynamics Analysis of PM2.5 (2010–2014)](https://docs.google.com/document/d/124ADb8t6IbPJpYU6PRuYUdOmJaD6E-nuFDTgjHBaaTg/edit?usp=sharing)
+
+Module 12 - System Complexity and Information Theory [Entropy and Information Flow in Beijing Air Quality Dynamics](https://docs.google.com/document/d/1vGb-6jPlhdItALXpYNEw1siY5unStlnDAYBjEbJYgiY/edit?usp=sharing)
