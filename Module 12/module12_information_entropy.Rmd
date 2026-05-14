@@ -1,0 +1,407 @@
+---
+title: "Module 12 – System Complexity and Information Theory"
+subtitle: "Entropy and Information Flow in Beijing Air Quality Dynamics"
+author: "Bei Ding"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 4.5,
+  fig.align = "center"
+)
+```
+
+## Data and Preprocessing
+
+```{r load-data}
+# ── Packages ──────────────────────────────────────────────────────────────────
+# install.packages(c("pracma", "RTransferEntropy", "zoo", "ggplot2", "dplyr", "patchwork"))
+library(pracma)
+library(RTransferEntropy)
+library(zoo)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# ── Load data ─────────────────────────────────────────────────────────────────
+df_raw <- read.csv("/Users/lexie/Downloads/PRSA_data_2010_1_1-2014_12_31_2.csv")
+
+# Create datetime and season labels
+df <- df_raw %>%
+  filter(!is.na(pm2.5), !is.na(TEMP)) %>%
+  mutate(
+    datetime = as.POSIXct(
+      paste(year, month, day, hour),
+      format = "%Y %m %d %H"
+    ),
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Winter",
+      month %in% c(3, 4, 5)  ~ "Spring",
+      month %in% c(6, 7, 8)  ~ "Summer",
+      month %in% c(9, 10, 11) ~ "Autumn"
+    ),
+    season = factor(season, levels = c("Spring", "Summer", "Autumn", "Winter"))
+  )
+
+cat("Observations after removing NA:", nrow(df), "\n")
+cat("Date range:", format(min(df$datetime)), "to", format(max(df$datetime)), "\n")
+```
+
+```{r overview-plot, fig.height=3.5}
+ggplot(df, aes(x = datetime, y = pm2.5)) +
+  geom_line(alpha = 0.4, colour = "#2C7BB6", linewidth = 0.3) +
+  geom_smooth(colour = "#D7191C", linewidth = 1, se = FALSE, span = 0.05) +
+  labs(
+    title = "Beijing PM2.5 Concentration (2010–2014)",
+    subtitle = "Hourly observations with smoothed trend",
+    x = NULL, y = "PM2.5 (µg/m³)"
+  ) +
+  theme_minimal(base_size = 12)
+ggsave("fig1_overview.png", width=9, height=4, dpi=150)
+```
+
+
+---
+
+## Q1 — SampEn vs. Surrogate Data and Maximum Uncertainty
+
+
+### Shannon Entropy as a Complement
+
+```{r shannon}
+# Shannon entropy function
+shannon_entropy <- function(x, bins = 50) {
+  x <- x[!is.na(x)]
+  breaks <- seq(min(x), max(x), length.out = bins + 1)
+  counts <- hist(x, breaks = breaks, plot = FALSE)$counts
+  probs  <- counts / sum(counts)
+  probs  <- probs[probs > 0]
+  -sum(probs * log2(probs))
+}
+
+H_pm25   <- shannon_entropy(df$pm2.5)
+H_uniform <- log2(50)  # maximum possible for 50 bins
+
+cat(sprintf("Shannon Entropy (PM2.5):     %.4f bits\n", H_pm25))
+cat(sprintf("Maximum possible entropy:    %.4f bits\n", H_uniform))
+cat(sprintf("Relative entropy:            %.1f%%\n", 100 * H_pm25 / H_uniform))
+```
+
+
+### Sample Entropy
+
+```{r sampen-setup}
+# Use a representative subset for speed (one year of data)
+set.seed(42)
+pm25_clean <- df$pm2.5[!is.na(df$pm2.5)]
+pm25_z     <- (pm25_clean - mean(pm25_clean)) / sd(pm25_clean)
+
+# Parameters: m = 2, r = 0.2 * SD (after z-scoring, SD = 1, so r = 0.2)
+m_param <- 2
+r_param <- 0.2
+
+# Sample from full series for computation
+idx     <- sort(sample(length(pm25_z), 3000))
+pm25_s  <- pm25_z[idx]
+
+sampen_obs <- sample_entropy(pm25_s, edim = m_param, r = r_param, tau = 1)
+cat(sprintf("Observed SampEn (PM2.5): %.4f\n", sampen_obs))
+```
+
+```{r surrogate, cache=TRUE}
+# Generate 10 surrogate (shuffled) series
+n_surr    <- 10
+surr_vals <- numeric(n_surr)
+
+set.seed(123)
+for (i in seq_len(n_surr)) {
+  surr_i      <- sample(pm25_s)
+  surr_vals[i] <- sample_entropy(surr_i, edim = m_param, r = r_param, tau = 1)
+}
+
+# Maximum uncertainty baseline: uniform noise
+max_signal   <- runif(length(pm25_s))
+max_signal_z <- (max_signal - mean(max_signal)) / sd(max_signal)
+sampen_max   <- sample_entropy(max_signal_z, edim = m_param, r = r_param, tau = 1)
+
+cat(sprintf("Surrogate SampEn (mean ± SD): %.4f ± %.4f\n", mean(surr_vals), sd(surr_vals)))
+cat(sprintf("Maximum uncertainty SampEn:    %.4f\n", sampen_max))
+```
+
+```{r q1-plot, fig.height=4}
+comparison_df <- data.frame(
+  label = c("Observed\nPM2.5", paste0("Surrogate\n", 1:n_surr), "Maximum\nUncertainty"),
+  value = c(sampen_obs, surr_vals, sampen_max),
+  group = c("Observed", rep("Surrogate", n_surr), "Max Uncertainty")
+)
+
+ggplot(comparison_df, aes(x = label, y = value, fill = group)) +
+  geom_col(width = 0.6, colour = "white") +
+  geom_hline(yintercept = sampen_obs, linetype = "dashed", colour = "#D7191C", linewidth = 0.8) +
+  scale_fill_manual(values = c(
+    "Observed"        = "#2C7BB6",
+    "Surrogate"       = "#ABD9E9",
+    "Max Uncertainty" = "#FDAE61"
+  )) +
+  labs(
+    title    = "Sample Entropy: Observed vs. Surrogates vs. Maximum Uncertainty",
+    subtitle = "Lower SampEn = more temporal regularity",
+    x = NULL, y = "Sample Entropy", fill = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(size = 9))
+ggsave("fig2_sampen.png", width=9, height=4.5, dpi=150)
+```
+
+---
+
+## Q2 — Seasonal Differences in System Complexity
+
+
+```{r seasonal-sampen, cache=TRUE}
+seasons <- c("Spring", "Summer", "Autumn", "Winter")
+season_sampen <- numeric(length(seasons))
+season_n      <- numeric(length(seasons))
+
+set.seed(99)
+for (i in seq_along(seasons)) {
+  s_data <- df %>%
+    filter(season == seasons[i]) %>%
+    pull(pm2.5)
+  
+  s_data <- (s_data - mean(s_data)) / sd(s_data)
+  
+  # Subsample for speed
+  if (length(s_data) > 2000) s_data <- s_data[sort(sample(length(s_data), 2000))]
+  
+  season_sampen[i] <- sample_entropy(s_data, edim = 2, r = 0.2, tau = 1)
+  season_n[i]      <- length(s_data)
+}
+
+seasonal_df <- data.frame(
+  season = seasons,
+  sampen = season_sampen,
+  n      = season_n
+)
+print(seasonal_df)
+```
+
+```{r q2-plot, fig.height=4}
+season_colours <- c(
+  Spring = "#66C2A5", Summer = "#FC8D62",
+  Autumn = "#8DA0CB", Winter = "#E78AC3"
+)
+
+# Also show mean PM2.5 per season for context
+season_mean <- df %>%
+  group_by(season) %>%
+  summarise(mean_pm25 = mean(pm2.5, na.rm = TRUE), .groups = "drop")
+
+seasonal_df <- left_join(seasonal_df, season_mean, by = "season")
+seasonal_df$season <- factor(seasonal_df$season, levels = seasons)
+
+p1 <- ggplot(seasonal_df, aes(x = season, y = sampen, fill = season)) +
+  geom_col(width = 0.6, colour = "white") +
+  scale_fill_manual(values = season_colours) +
+  labs(title = "Sample Entropy by Season", x = NULL, y = "SampEn", fill = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+
+
+p2 <- ggplot(seasonal_df, aes(x = season, y = mean_pm25, fill = season)) +
+  geom_col(width = 0.6, colour = "white") +
+  scale_fill_manual(values = season_colours) +
+  labs(title = "Mean PM2.5 by Season", x = NULL, y = "PM2.5 (µg/m³)", fill = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+p1 + p2
+ggsave("fig3_seasonal_both.png", width=10, height=5, dpi=150)
+
+p1 + p2
+```
+
+---
+
+## Q3 — Entropy Over Time: Is the System Changing?
+
+
+```{r rolling-sampen, cache=TRUE}
+# Monthly SampEn estimates
+df_monthly <- df %>%
+  mutate(ym = format(datetime, "%Y-%m")) %>%
+  group_by(ym) %>%
+  summarise(
+    pm25_vals = list(pm2.5),
+    date      = min(datetime),
+    .groups   = "drop"
+  )
+
+set.seed(77)
+monthly_sampen <- sapply(df_monthly$pm25_vals, function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) < 100) return(NA)
+  xz <- (x - mean(x)) / sd(x)
+  if (length(xz) > 500) xz <- xz[sort(sample(length(xz), 500))]
+  tryCatch(
+    sample_entropy(xz, edim = 2, r = 0.2, tau = 1),
+    error = function(e) NA
+  )
+})
+
+ts_df <- data.frame(
+  date   = df_monthly$date,
+  sampen = monthly_sampen
+) %>% filter(!is.na(sampen))
+```
+
+```{r q3-plot, fig.height=4}
+ggplot(ts_df, aes(x = date, y = sampen)) +
+  geom_line(colour = "#ABD9E9", linewidth = 0.8) +
+  geom_point(colour = "#2C7BB6", size = 1.5) +
+  geom_smooth(method = "lm", colour = "#D7191C", se = TRUE, linewidth = 1) +
+  labs(
+    title    = "Monthly Sample Entropy of PM2.5 (2010–2014)",
+    subtitle = "Red line = linear trend; shaded = 95% CI",
+    x = NULL, y = "Sample Entropy"
+  ) +
+  theme_minimal(base_size = 12)
+ggsave("fig4_rolling.png", width=9, height=4.5, dpi=150)
+
+```
+
+```{r trend-test}
+# Test for linear trend
+lm_trend <- lm(sampen ~ as.numeric(date), data = ts_df)
+summary(lm_trend)$coefficients
+```
+
+
+---
+
+## Q4 — Scaling Exponents and Long-Range Dependence
+
+
+- **H > 0.5**: persistent long-range correlations (the signal has memory)
+- **H = 0.5**: random walk (no long-range structure)
+- **H < 0.5**: anti-persistent signal
+
+```{r hurst}
+# Hurst exponent via R/S analysis
+# Use a clean continuous stretch
+pm25_hurst <- df$pm2.5[!is.na(df$pm2.5)]
+pm25_hurst <- pm25_hurst[1:5000]  # use first 5000 points for speed
+
+H_result <- hurstexp(pm25_hurst, display = FALSE)
+cat(sprintf("Hurst Exponent (Hs - corrected R/S): %.4f\n", H_result$Hs))
+cat(sprintf("Hurst Exponent (He - empirical):      %.4f\n", H_result$He))
+```
+
+---
+
+## Q5 — Transfer Entropy: Information Flow Between Temperature and PM2.5
+
+
+$$T_{X \to Y} = \sum p(y_{t+1}, y_t^k, x_t^l) \log \frac{p(y_{t+1} | y_t^k, x_t^l)}{p(y_{t+1} | y_t^k)}$$
+
+```{r te-data}
+# Use a clean subset for TE analysis (TE is computationally expensive)
+set.seed(42)
+te_df <- df %>%
+  filter(year == 2013) %>%   # one full year
+  select(pm2.5, TEMP) %>%
+  filter(!is.na(pm2.5), !is.na(TEMP))
+
+# Subsample to 1000 observations for feasibility
+idx_te  <- sort(sample(nrow(te_df), 1000))
+pm25_te <- te_df$pm2.5[idx_te]
+temp_te <- te_df$TEMP[idx_te]
+
+cat("TE analysis sample size:", length(pm25_te), "\n")
+```
+
+```{r te-run, cache=TRUE}
+set.seed(42)
+te_result <- transfer_entropy(
+  x      = temp_te,
+  y      = pm25_te,
+  lx     = 1,
+  ly     = 1,
+  nboot  = 100,
+  quiet  = TRUE
+)
+
+summary(te_result)
+```
+
+```{r directionality}
+# coef is a matrix: rows = X->Y / Y->X, cols = te / ete / se / p-value
+te_xy <- te_result$coef["X->Y", "te"]
+te_yx <- te_result$coef["Y->X", "te"]
+DI    <- te_xy - te_yx
+
+cat(sprintf("TE (TEMP -> PM2.5): %.6f\n", te_xy))
+cat(sprintf("TE (PM2.5 -> TEMP): %.6f\n", te_yx))
+cat(sprintf("Directionality Index: %.6f\n", DI))
+
+if (DI > 0) {
+  cat("-> Temperature exerts a driving influence on PM2.5 dynamics\n")
+} else if (DI < 0) {
+  cat("-> PM2.5 exerts a driving influence on Temperature dynamics\n")
+} else {
+  cat("-> Bidirectional / no clear directionality\n")
+}
+```
+
+```{r te-sensitivity, cache=TRUE}
+# Sensitivity: vary lag parameter
+lag_vals <- 1:5
+DI_lags  <- numeric(length(lag_vals))
+
+set.seed(42)
+for (i in seq_along(lag_vals)) {
+  te_i <- transfer_entropy(
+    x = temp_te, y = pm25_te,
+    lx = lag_vals[i], ly = lag_vals[i],
+    nboot = 50, quiet = TRUE
+  )
+  DI_lags[i] <- te_i$coef["X->Y", "te"] - te_i$coef["Y->X", "te"]
+}
+
+lag_df <- data.frame(lag = lag_vals, DI = DI_lags)
+```
+
+```{r q5-plot, fig.height=4.5}
+# Panel A: TE coefficients — coef is a matrix, extract by row/col name
+te_coef_df <- data.frame(
+  direction = c("TEMP -> PM2.5", "PM2.5 -> TEMP"),
+  te        = c(te_result$coef["X->Y", "te"], te_result$coef["Y->X", "te"]),
+  ete       = c(te_result$coef["X->Y", "ete"], te_result$coef["Y->X", "ete"])
+)
+
+p_te <- ggplot(te_coef_df, aes(x = direction, y = te, fill = direction)) +
+  geom_col(width = 0.5, colour = "white") +
+  scale_fill_manual(values = c("TEMP → PM2.5" = "#2C7BB6", "PM2.5 → TEMP" = "#FDAE61")) +
+  labs(title = "Transfer Entropy Coefficients",
+       x = NULL, y = "Transfer Entropy", fill = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+
+# Panel B: DI across lags
+p_lag <- ggplot(lag_df, aes(x = lag, y = DI)) +
+  geom_line(colour = "#2C7BB6", linewidth = 1) +
+  geom_point(colour = "#2C7BB6", size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+  labs(title = "Directionality Index Across Lag Parameters",
+       subtitle = "Positive = TEMP drives PM2.5",
+       x = "Lag (lx = ly)", y = "Directionality Index") +
+  theme_minimal(base_size = 12)
+ggsave("fig5_te.png", width=9, height=4.5, dpi=150)
+
+p_te + p_lag
+```
+
